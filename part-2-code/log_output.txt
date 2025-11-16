@@ -1,0 +1,47 @@
+Using device: cuda
+============================================================
+T5 Text-to-SQL Training
+============================================================
+Experiment: baseline
+Mode: Fine-tuning
+Max epochs: 20
+Batch size: 16 (train), 16 (eval)
+Learning rate: 3e-05
+============================================================
+Required directories checked/created
+Loading data...
+Loading training data...
+Loading development data...
+Loading test data...
+Data loaded: train=4225, dev=466, test=432
+Initializing model...
+Loading pretrained T5-small model for fine-tuning...
+Model initialized: 60,506,624 total parameters, 60,506,624 trainable
+Initializing optimizer and scheduler...
+Optimizer initialized: AdamW, lr=3e-05, weight_decay=0.01
+Scheduler initialized: linear, warmup_epochs=1
+Required directories checked/created
+Starting training for 20 epochs...
+Checkpoints will be saved to: checkpoints/ft_experiments/baseline
+Results will be saved with prefix: t5_ft_baseline
+Training:   0%|          | 0/265 [00:00<?, ?it/s]Training:   0%|          | 0/265 [00:03<?, ?it/s, loss=9.4162]Training:   0%|          | 1/265 [00:03<13:39,  3.10s/it, loss=9.4162]Training:   0%|          | 1/265 [00:05<13:39,  3.10s/it, loss=9.1619]Training:   1%|          | 2/265 [00:05<12:46,  2.91s/it, loss=9.1619]Training:   1%|          | 2/265 [00:06<12:46,  2.91s/it, loss=9.3205]Training:   1%|          | 3/265 [00:06<08:19,  1.91s/it, loss=9.3205]Training:   1%|          | 3/265 [00:07<08:19,  1.91s/it, loss=8.8349]Training:   2%|▏         | 4/265 [00:07<07:15,  1.67s/it, loss=8.8349]Training:   2%|▏         | 4/265 [00:09<07:15,  1.67s/it, loss=8.8645]Training:   2%|▏         | 5/265 [00:09<06:27,  1.49s/it, loss=8.8645]Training:   2%|▏         | 5/265 [00:12<06:27,  1.49s/it, loss=9.7664]Training:   2%|▏         | 6/265 [00:12<08:53,  2.06s/it, loss=9.7664]Training:   2%|▏         | 6/265 [00:13<08:53,  2.06s/it, loss=8.8768]Training:   3%|▎         | 7/265 [00:13<07:17,  1.70s/it, loss=8.8768]Training:   3%|▎         | 7/265 [00:14<07:17,  1.70s/it, loss=9.1268]Training:   3%|▎         | 8/265 [00:14<06:11,  1.45s/it, loss=9.1268]Training:   3%|▎         | 8/265 [00:17<06:11,  1.45s/it, loss=10.1006]Training:   3%|▎         | 9/265 [00:17<08:44,  2.05s/it, loss=10.1006]Training:   3%|▎         | 9/265 [00:18<08:44,  2.05s/it, loss=8.9042] Training:   4%|▍         | 10/265 [00:18<07:54,  1.86s/it, loss=8.9042]Training:   4%|▍         | 10/265 [00:19<07:54,  1.86s/it, loss=7.8693]Training:   4%|▍         | 11/265 [00:19<06:29,  1.53s/it, loss=7.8693]Training:   4%|▍         | 11/265 [00:22<06:29,  1.53s/it, loss=8.2149]Training:   5%|▍         | 12/265 [00:22<07:51,  1.86s/it, loss=8.2149]Training:   5%|▍         | 12/265 [00:23<08:16,  1.96s/it, loss=8.2149]
+Traceback (most recent call last):
+  File "/mnt/e/大学/研二第一学期/NLP/hw4 (2)/hw4/hw4-code/part-2-code/train_t5.py", line 361, in <module>
+    exit(main())
+         ^^^^^^
+  File "/mnt/e/大学/研二第一学期/NLP/hw4 (2)/hw4/hw4-code/part-2-code/train_t5.py", line 310, in main
+    best_f1 = train(args, model, train_loader, dev_loader, optimizer, scheduler)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/e/大学/研二第一学期/NLP/hw4 (2)/hw4/hw4-code/part-2-code/train_t5.py", line 76, in train
+    tr_loss = train_epoch(args, model, train_loader, optimizer, scheduler)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/e/大学/研二第一学期/NLP/hw4 (2)/hw4/hw4-code/part-2-code/train_t5.py", line 150, in train_epoch
+    loss.backward()
+  File "/root/miniconda3/envs/part2/lib/python3.12/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/root/miniconda3/envs/part2/lib/python3.12/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/root/miniconda3/envs/part2/lib/python3.12/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
