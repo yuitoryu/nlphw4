@@ -11,27 +11,27 @@ def analyze_data():
     stats = {}
     
     for split in splits:
-        # 读取自然语言文件
+        # Read natural language data
         with open(f'data/{split}.nl', 'r', encoding='utf-8') as f:
             nl_lines = [line.strip() for line in f.readlines()]
         
-        # 读取SQL文件
+        # Read SQL data
         with open(f'data/{split}.sql', 'r', encoding='utf-8') as f:
             sql_lines = [line.strip() for line in f.readlines()]
         
-        # 计算统计信息
+        # Compute statistics
         nl_lengths = []
         sql_lengths = []
         nl_vocab = set()
         sql_vocab = set()
         
         for nl, sql in zip(nl_lines, sql_lines):
-            # 自然语言统计
+            # Natural language statistics
             nl_tokens = tokenizer.tokenize(nl)
             nl_lengths.append(len(nl_tokens))
             nl_vocab.update(nl_tokens)
             
-            # SQL统计
+            # SQL statistics
             sql_tokens = tokenizer.tokenize(sql)
             sql_lengths.append(len(sql_tokens))
             sql_vocab.update(sql_tokens)

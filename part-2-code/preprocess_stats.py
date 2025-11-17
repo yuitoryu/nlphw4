@@ -4,10 +4,10 @@ from collections import Counter
 from transformers import T5TokenizerFast
 import torch
 from torch.utils.data import Dataset, DataLoader
-from load_data import T5Dataset  # 使用我们之前定义的Dataset
+from load_data import T5Dataset  # Reuse the dataset implementation we defined earlier
 
 def analyze_preprocessing():
-    """分析预处理前后的数据统计"""
+    """Analyze dataset statistics before and after preprocessing"""
     tokenizer = T5TokenizerFast.from_pretrained('google-t5/t5-small')
     
     print("=" * 60)
@@ -20,18 +20,18 @@ def analyze_preprocessing():
     for split in splits:
         print(f"\nAnalyzing {split} set...")
         
-        # 创建数据集实例（这会触发预处理）
+        # Instantiate the dataset (which triggers preprocessing)
         dataset = T5Dataset('data', split)
         
-        # 原始数据统计
+        # Raw data statistics
         nl_path = f'data/{split}.nl'
         with open(nl_path, 'r', encoding='utf-8') as f:
             raw_nl_lines = [line.strip() for line in f.readlines()]
         
-        # 预处理后的数据统计
+        # Processed data statistics
         processed_nl_texts = dataset.encoder_inputs
         
-        # 计算原始NL统计
+        # Compute statistics over raw NL examples
         raw_nl_lengths = []
         raw_nl_tokens_all = []
         for line in raw_nl_lines:
@@ -39,7 +39,7 @@ def analyze_preprocessing():
             raw_nl_lengths.append(len(tokens))
             raw_nl_tokens_all.extend(tokens)
         
-        # 计算预处理后NL统计
+        # Compute statistics over processed NL examples
         processed_nl_lengths = []
         processed_nl_tokens_all = []
         for text in processed_nl_texts:
@@ -47,7 +47,7 @@ def analyze_preprocessing():
             processed_nl_lengths.append(len(tokens))
             processed_nl_tokens_all.extend(tokens)
         
-        # SQL统计（如果存在）
+        # Collect SQL statistics when available
         if split != 'test':
             sql_path = f'data/{split}.sql'
             with open(sql_path, 'r', encoding='utf-8') as f:
@@ -60,7 +60,7 @@ def analyze_preprocessing():
                 raw_sql_lengths.append(len(tokens))
                 raw_sql_tokens_all.extend(tokens)
             
-            # 预处理后的SQL（与原始相同，因为我们没有对SQL做特殊预处理）
+            # SQL after preprocessing (identical because SQL is untouched)
             processed_sql_texts = dataset.decoder_targets
             processed_sql_lengths = []
             processed_sql_tokens_all = []
@@ -100,7 +100,7 @@ def analyze_preprocessing():
             }
         }
         
-        # 打印详细统计
+        # Print detailed statistics
         print(f"\n{split.upper()} SET - RAW DATA:")
         print(f"  Examples: {results[split]['raw']['num_examples']}")
         print(f"  NL - Mean length: {results[split]['raw']['nl_mean_length']:.2f} tokens")
@@ -123,7 +123,7 @@ def analyze_preprocessing():
             print(f"  SQL - Max length: {results[split]['processed']['sql_max_length']} tokens")
             print(f"  SQL - Vocabulary: {results[split]['processed']['sql_vocab_size']} unique tokens")
         
-        # 显示预处理变化
+        # Show the effect of preprocessing
         if split != 'test':
             nl_length_change = results[split]['processed']['nl_mean_length'] - results[split]['raw']['nl_mean_length']
             print(f"  NL length change due to prefix: +{nl_length_change:.2f} tokens")
@@ -131,7 +131,7 @@ def analyze_preprocessing():
     return results
 
 def print_latex_tables(results):
-    """生成LaTeX格式的表格"""
+    """Generate LaTeX tables"""
     print("\n" + "=" * 60)
     print("LATEX TABLES FOR REPORT")
     print("=" * 60)
@@ -203,14 +203,14 @@ def print_latex_tables(results):
     print("\\end{table}")
 
 def analyze_token_distribution():
-    """分析token分布情况"""
+    """Analyze the token distribution"""
     print("\n" + "=" * 60)
     print("TOKEN DISTRIBUTION ANALYSIS")
     print("=" * 60)
     
     tokenizer = T5TokenizerFast.from_pretrained('google-t5/t5-small')
     
-    # 分析训练集中的token频率
+    # Analyze token frequencies in the training split
     with open('data/train.nl', 'r', encoding='utf-8') as f:
         nl_lines = [line.strip() for line in f.readlines()]
     
@@ -226,7 +226,7 @@ def analyze_token_distribution():
         all_nl_tokens.extend(nl_tokens)
         all_sql_tokens.extend(sql_tokens)
     
-    # 计算最常见的tokens
+    # Compute the most frequent tokens
     nl_token_freq = Counter(all_nl_tokens)
     sql_token_freq = Counter(all_sql_tokens)
     
@@ -241,18 +241,18 @@ def analyze_token_distribution():
     for token, count in sql_token_freq.most_common(10):
         print(f"  {token}: {count} occurrences")
     
-    # 分析OOV情况
+    # Analyze out-of-vocabulary coverage
     print(f"\nTokenizer vocabulary size: {tokenizer.vocab_size}")
     print(f"Coverage of NL tokens: {len(nl_token_freq) / tokenizer.vocab_size * 100:.2f}%")
     print(f"Coverage of SQL tokens: {len(sql_token_freq) / tokenizer.vocab_size * 100:.2f}%")
 
 def check_data_quality():
-    """检查数据质量"""
+    """Check dataset quality"""
     print("\n" + "=" * 60)
     print("DATA QUALITY CHECK")
     print("=" * 60)
     
-    # 检查文件行数是否匹配
+    # Verify matching line counts across files
     for split in ['train', 'dev']:
         nl_file = f'data/{split}.nl'
         sql_file = f'data/{split}.sql'
@@ -271,14 +271,14 @@ def check_data_quality():
         if len(nl_lines) != len(sql_lines):
             print(f"  WARNING: Line count mismatch!")
     
-    # 检查test set
+    # Inspect the test split
     test_nl_file = 'data/test.nl'
     with open(test_nl_file, 'r', encoding='utf-8') as f:
         test_lines = f.readlines()
     print(f"\nTEST set: {len(test_lines)} NL examples")
 
 if __name__ == "__main__":
-    # 运行所有分析
+    # Run the full analysis suite
     check_data_quality()
     results = analyze_preprocessing()
     analyze_token_distribution()

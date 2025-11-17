@@ -10,35 +10,35 @@ import wandb
 from t5_utils import (initialize_model, initialize_optimizer_and_scheduler, 
                      save_model, load_model_from_checkpoint, setup_wandb, ensure_dirs)
 from transformers import T5TokenizerFast
-from load_data import load_t5_data
+from load_data_old import load_t5_data
 from utils import compute_metrics, save_queries_and_records
 
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 PAD_IDX = 0
 
 def is_bf16_supported():
-    """检查当前环境是否支持bfloat16"""
+    """Check whether the current environment supports bfloat16"""
     if DEVICE.type != 'cuda':
         return False
     return hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported()
 
 def precision_context(args):
-    """根据配置返回自动混合精度上下文"""
+    """Return the autocast context based on the configuration"""
     if getattr(args, 'use_bf16', False) and DEVICE.type == 'cuda':
         return torch.autocast(device_type='cuda', dtype=torch.bfloat16)
     return nullcontext()
 
 def get_args():
-    '''训练参数配置'''
+    '''Training argument configuration'''
     parser = argparse.ArgumentParser(description='T5 training for Text-to-SQL')
     
-    # 模型配置
+    # Model configuration
     parser.add_argument('--finetune', action='store_true', 
                        help="Fine-tune pretrained T5 (otherwise train from scratch)")
     parser.add_argument('--bf16', action='store_true',
                        help="Use bfloat16 mixed precision when supported")
     
-    # 训练超参数
+    # Training hyperparameters
     parser.add_argument('--optimizer_type', type=str, default="AdamW", choices=["AdamW"])
     parser.add_argument('--learning_rate', type=float, default=3e-4,
                        help="Learning rate (suggested: 1e-4 for finetune, 3e-4 for scratch)")
@@ -50,66 +50,88 @@ def get_args():
     parser.add_argument('--max_n_epochs', type=int, default=25)
     parser.add_argument('--patience_epochs', type=int, default=5)
 
-    # 实验跟踪
+    # Experiment tracking
     parser.add_argument('--use_wandb', action='store_true',
                        help="Use Weights & Biases for experiment tracking")
     parser.add_argument('--experiment_name', type=str, default='baseline',
                        help="Name for this experiment run")
     parser.add_argument('--force_sql_eval', action='store_true',
                        help="Force SQL-based evaluation each epoch even when not fine-tuning")
+    parser.add_argument('--sql_eval_every', type=int, default=None,
+                        help="If set, run SQL/F1 evaluation every N epochs. "
+                             "Use 0 or a negative value to skip until final evaluation.")
+    parser.add_argument('--test_only', action='store_true',
+                        help="Skip training and only run test inference using saved checkpoints.")
 
-    # 数据超参数
+    # Data hyperparameters
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--test_batch_size', type=int, default=16)
 
     return parser.parse_args()
 
 def train(args, model, train_loader, dev_loader, optimizer, scheduler):
-    """训练主循环"""
+    """Main training loop"""
     ensure_dirs()
     best_f1 = -1
     best_loss = float('inf')
     epochs_since_improvement = 0
-    run_sql_eval = args.finetune or args.force_sql_eval
+    sql_metrics_observed = False
+    
+    default_sql_eval_interval = 1 if (args.finetune or args.force_sql_eval) else 5
+    if args.sql_eval_every is None:
+        sql_eval_interval = default_sql_eval_interval
+    elif args.sql_eval_every <= 0:
+        sql_eval_interval = None
+    else:
+        sql_eval_interval = args.sql_eval_every
     
     model_type = 'ft' if args.finetune else 'scr'
     checkpoint_dir = os.path.join('checkpoints', f'{model_type}_experiments', args.experiment_name)
     args.checkpoint_dir = checkpoint_dir
     
-    # 评估文件路径
+    # Evaluation file paths
     gt_sql_path = os.path.join('data', 'dev.sql')
     gt_record_path = os.path.join('records', 'ground_truth_dev.pkl')
     model_sql_path = os.path.join('results', f't5_{model_type}_{args.experiment_name}_dev.sql')
     model_record_path = os.path.join('records', f't5_{model_type}_{args.experiment_name}_dev.pkl')
     
-    # 确保目录存在
+    # Ensure directories exist
     os.makedirs(os.path.dirname(model_sql_path), exist_ok=True)
     os.makedirs(os.path.dirname(model_record_path), exist_ok=True)
     
     print(f"Starting training for {args.max_n_epochs} epochs...")
     print(f"Checkpoints will be saved to: {checkpoint_dir}")
     print(f"Results will be saved with prefix: t5_{model_type}_{args.experiment_name}")
+    if sql_eval_interval is None:
+        print("SQL/F1 evaluation during training is disabled (will only run after training).")
+    elif sql_eval_interval == 1:
+        print("SQL/F1 evaluation will run after every epoch.")
+    else:
+        print(f"SQL/F1 evaluation will run every {sql_eval_interval} epochs.")
     
     for epoch in range(args.max_n_epochs):
-        # 训练一个epoch
+        # Train for one epoch
         tr_loss = train_epoch(args, model, train_loader, optimizer, scheduler)
         print(f"Epoch {epoch+1}/{args.max_n_epochs}: Train Loss = {tr_loss:.4f}")
 
-        # 评估（非微调模式下每5个epoch运行一次完整SQL评估）
-        should_run_sql_eval = run_sql_eval or ((epoch + 1) % 5 == 0)
+        # Evaluation (run SQL eval according to configuration)
+        should_run_sql_eval = (
+            sql_eval_interval is not None and (epoch + 1) % sql_eval_interval == 0
+        )
         eval_loss, record_f1, record_em, sql_em, error_rate = eval_epoch(
             args, model, dev_loader, gt_sql_path, model_sql_path, gt_record_path, model_record_path,
             run_sql_eval=should_run_sql_eval
         )
         
         if record_f1 is not None:
+            sql_metrics_observed = True
             print(f"Epoch {epoch+1}: Dev Loss = {eval_loss:.4f}, Record F1 = {record_f1:.4f}, "
                   f"Record EM = {record_em:.4f}, SQL EM = {sql_em:.4f}")
             print(f"Epoch {epoch+1}: Error Rate = {error_rate*100:.2f}%")
         else:
             print(f"Epoch {epoch+1}: Dev Loss = {eval_loss:.4f} (SQL metrics skipped)")
 
-        # 记录到wandb
+        # Log to Weights & Biases
         if args.use_wandb:
             metrics_to_log = {
                 'epoch': epoch + 1,
@@ -125,7 +147,7 @@ def train(args, model, train_loader, dev_loader, optimizer, scheduler):
                 })
             wandb.log(metrics_to_log)
 
-        # 早停逻辑
+        # Early stopping logic
         if record_f1 is not None:
             if record_f1 > best_f1:
                 best_f1 = record_f1
@@ -143,22 +165,22 @@ def train(args, model, train_loader, dev_loader, optimizer, scheduler):
             else:
                 epochs_since_improvement += 1
 
-        # 保存最新模型
+        # Save the latest model
         save_model(checkpoint_dir, model, best=False)
 
-        # 检查早停
+        # Check the early stopping condition
         if epochs_since_improvement >= args.patience_epochs:
             print(f"Early stopping after {epoch + 1} epochs without improvement")
             break
 
-    if run_sql_eval:
+    if sql_metrics_observed:
         print(f"Training completed. Best F1: {best_f1:.4f}")
     else:
         print(f"Training completed. Best Dev Loss: {best_loss:.4f}")
     return best_f1
 
 def train_epoch(args, model, train_loader, optimizer, scheduler):
-    """训练一个epoch"""
+    """Train for a single epoch"""
     model.train()
     total_loss = 0
     total_batches = 0
@@ -166,16 +188,16 @@ def train_epoch(args, model, train_loader, optimizer, scheduler):
     progress_bar = tqdm(train_loader, desc="Training")
     
     for batch in progress_bar:
-        # 正常collate函数返回5个值
+        # The standard collate function returns five values
         encoder_input, encoder_mask, decoder_input, decoder_targets, _ = batch
         
-        # 移动到设备
+        # Move tensors to the device
         encoder_input = encoder_input.to(DEVICE)
         encoder_mask = encoder_mask.to(DEVICE)
         decoder_input = decoder_input.to(DEVICE)
         decoder_targets = decoder_targets.to(DEVICE)
 
-        # 前向传播
+        # Forward pass
         with precision_context(args):
             outputs = model(
                 input_ids=encoder_input,
@@ -185,18 +207,18 @@ def train_epoch(args, model, train_loader, optimizer, scheduler):
             )
             loss = outputs.loss
         
-        # 反向传播
+        # Backward pass
         optimizer.zero_grad()
         loss.backward()
         
-        # 梯度裁剪
+        # Gradient clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         
         optimizer.step()
         if scheduler is not None:
             scheduler.step()
 
-        # 统计
+        # Statistics
         total_loss += loss.item()
         total_batches += 1
         
@@ -206,7 +228,7 @@ def train_epoch(args, model, train_loader, optimizer, scheduler):
 
 def eval_epoch(args, model, dev_loader, gt_sql_path, model_sql_path, gt_record_path, model_record_path,
                run_sql_eval=True):
-    """评估模型"""
+    """Evaluate the model"""
     model.eval()
     total_loss = 0
     total_batches = 0
@@ -218,9 +240,9 @@ def eval_epoch(args, model, dev_loader, gt_sql_path, model_sql_path, gt_record_p
         tokenizer = None
     
     with torch.no_grad():
-        # 计算验证损失
+        # Compute validation loss
         for batch in tqdm(dev_loader, desc="Evaluating Loss"):
-            # 正常collate函数返回5个值
+            # The standard collate function returns five values
             encoder_input, encoder_mask, decoder_input, decoder_targets, _ = batch
             
             encoder_input = encoder_input.to(DEVICE)
@@ -244,48 +266,51 @@ def eval_epoch(args, model, dev_loader, gt_sql_path, model_sql_path, gt_record_p
             print("Skipping SQL query generation and metrics for this evaluation run.")
             return avg_loss, None, None, None, None
         
-        # 生成SQL查询
+        # Generate SQL queries
         print("Generating SQL queries for evaluation...")
         for batch in tqdm(dev_loader, desc="Generating SQL"):
-            # 对于生成，我们只需要前3个元素：encoder_input, encoder_mask, initial_decoder_input
-            # 但normal_collate_fn返回5个元素，所以我们需要正确解包
+            # For generation we only need the first three items: encoder_input, encoder_mask, initial_decoder_input
+            # normal_collate_fn returns five items, so unpack accordingly
             encoder_input, encoder_mask, _, _, initial_decoder_input = batch
             
             encoder_input = encoder_input.to(DEVICE)
             encoder_mask = encoder_mask.to(DEVICE)
             
-            # 使用beam search生成
+            # Generate using beam search
             with precision_context(args):
                 generated_ids = model.generate(
                     input_ids=encoder_input,
                     attention_mask=encoder_mask,
                     max_length=256,
-                    num_beams=4,
+                    num_beams=10,
                     early_stopping=True,
                     pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id,
-                    decoder_start_token_id=tokenizer.pad_token_id
+                    decoder_start_token_id=tokenizer.pad_token_id,
+                    no_repeat_ngram_size=4,
+                    repetition_penalty=1.2,
+                    renormalize_logits=True,
                 )
             
-            # 解码生成的SQL
+            # Decode generated SQL
             for gen_ids in generated_ids:
                 sql_query = tokenizer.decode(gen_ids, skip_special_tokens=True)
                 all_generated_queries.append(sql_query)
     
-    # 保存并计算指标
+    # Save outputs and compute metrics
     print("Saving generated queries and computing metrics...")
     save_queries_and_records(all_generated_queries, model_sql_path, model_record_path)
     sql_em, record_em, record_f1, error_msgs = compute_metrics(
         gt_sql_path, model_sql_path, gt_record_path, model_record_path
     )
     
-    # 计算错误率
+    # Compute error rate
     error_rate = sum(1 for msg in error_msgs if msg and msg.strip()) / len(error_msgs) if error_msgs else 0
     
     return avg_loss, record_f1, record_em, sql_em, error_rate
 
 def test_inference(args, model, test_loader, model_sql_path, model_record_path):
-    """测试集推理"""
+    """Inference on the test set"""
     model.eval()
     all_generated_queries = []
     
@@ -294,7 +319,7 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
     print("Generating test set predictions...")
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Test Inference"):
-            # 测试collate函数返回3个值
+            # Test collate function returns three values
             encoder_input, encoder_mask, initial_decoder_input = batch
             
             encoder_input = encoder_input.to(DEVICE)
@@ -316,14 +341,14 @@ def test_inference(args, model, test_loader, model_sql_path, model_record_path):
                 sql_query = tokenizer.decode(gen_ids, skip_special_tokens=True)
                 all_generated_queries.append(sql_query)
     
-    # 保存测试结果
+    # Save test results
     save_queries_and_records(all_generated_queries, model_sql_path, model_record_path)
     print(f"Test predictions saved to:")
     print(f"  SQL queries: {model_sql_path}")
     print(f"  Records: {model_record_path}")
 
 def main():
-    """主函数"""
+    """Main function"""
     args = get_args()
     
     print("=" * 60)
@@ -331,6 +356,8 @@ def main():
     print("=" * 60)
     print(f"Experiment: {args.experiment_name}")
     print(f"Mode: {'Fine-tuning' if args.finetune else 'Training from scratch'}")
+    if args.test_only:
+        print("Run type: Test-only inference (no training)")
     print(f"Max epochs: {args.max_n_epochs}")
     print(f"Batch size: {args.batch_size} (train), {args.test_batch_size} (eval)")
     print(f"Learning rate: {args.learning_rate}")
@@ -346,35 +373,54 @@ def main():
     else:
         args.use_bf16 = False
     
-    # 设置实验跟踪
+    # Set up experiment tracking
     if args.use_wandb:
         setup_wandb(args)
     
     try:
-        # 确保目录存在
+        # Ensure directories exist
         ensure_dirs()
         
-        # 加载数据
+        # Load data
         print("Loading data...")
         train_loader, dev_loader, test_loader = load_t5_data(args.batch_size, args.test_batch_size)
+
+        if args.test_only:
+            print("Test-only inference enabled. Skipping training and loading saved checkpoint...")
+            model = load_model_from_checkpoint(args, best=True)
+            model.eval()
+            
+            model_type = 'ft' if args.finetune else 'scr'
+            model_sql_path = os.path.join('results', f't5_{model_type}_{args.experiment_name}_test.sql')
+            model_record_path = os.path.join('records', f't5_{model_type}_{args.experiment_name}_test.pkl')
+            
+            test_inference(args, model, test_loader, model_sql_path, model_record_path)
+            
+            print("\n" + "=" * 50)
+            print("TEST-ONLY INFERENCE COMPLETE")
+            print("=" * 50)
+            print(f"SQL queries: {model_sql_path}")
+            print(f"Records: {model_record_path}")
+            print("=" * 50)
+            return 0
         
-        # 初始化模型
+        # Initialize the model
         print("Initializing model...")
         model = initialize_model(args)
         
-        # 初始化优化器和调度器
+        # Initialize optimizer and scheduler
         print("Initializing optimizer and scheduler...")
         optimizer, scheduler = initialize_optimizer_and_scheduler(args, model, len(train_loader))
         
-        # 训练模型
+        # Train the model
         best_f1 = train(args, model, train_loader, dev_loader, optimizer, scheduler)
         
-        # 加载最佳模型进行最终评估
+        # Load the best model for final evaluation
         print("\nLoading best model for final evaluation...")
         model = load_model_from_checkpoint(args, best=True)
         model.eval()
         
-        # 开发集最终评估
+        # Final evaluation on the development set
         model_type = 'ft' if args.finetune else 'scr'
         gt_sql_path = os.path.join('data', 'dev.sql')
         gt_record_path = os.path.join('records', 'ground_truth_dev.pkl')
@@ -396,7 +442,7 @@ def main():
         print(f"Error Rate: {dev_error_rate*100:.2f}%")
         print("=" * 50)
         
-        # 测试集推理
+        # Test set inference
         print("\nGenerating test set predictions...")
         model_sql_path = os.path.join('results', f't5_{model_type}_{args.experiment_name}_test.sql')
         model_record_path = os.path.join('records', f't5_{model_type}_{args.experiment_name}_test.pkl')

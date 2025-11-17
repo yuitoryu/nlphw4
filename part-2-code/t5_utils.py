@@ -9,16 +9,16 @@ DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 print(f"Using device: {DEVICE}")
 
 def setup_wandb(args):
-    """设置Weights & Biases日志记录"""
+    """Set up Weights & Biases logging"""
     if args.use_wandb:
         wandb.init(project="text-to-sql-t5", name=args.experiment_name)
         wandb.config.update(args)
 
 def initialize_model(args):
     """
-    初始化T5模型
-    - 如果args.finetune为True，则加载预训练权重进行微调
-    - 否则，从配置初始化（从头训练）
+    Initialize the T5 model.
+    - When args.finetune is True, load pretrained weights for fine-tuning.
+    - Otherwise initialize from the config (train from scratch).
     """
     try:
         if args.finetune:
@@ -31,7 +31,7 @@ def initialize_model(args):
         
         model.to(DEVICE)
         
-        # 打印模型参数数量
+        # Print the number of model parameters
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"Model initialized: {total_params:,} total parameters, {trainable_params:,} trainable")
@@ -42,14 +42,14 @@ def initialize_model(args):
         raise
 
 def ensure_dirs():
-    """确保所有必要的目录都存在"""
+    """Ensure all required directories exist"""
     dirs = ['checkpoints', 'results', 'records']
     for dir_path in dirs:
         os.makedirs(dir_path, exist_ok=True)
     print("Required directories checked/created")
 
 def save_model(checkpoint_dir, model, best=False):
-    """保存模型检查点"""
+    """Save a model checkpoint"""
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     if best:
@@ -57,14 +57,14 @@ def save_model(checkpoint_dir, model, best=False):
     else:
         model_path = os.path.join(checkpoint_dir, 'latest_model.pt')
     
-    # 保存模型状态字典
+    # Save model state dict
     torch.save({
         'model_state_dict': model.state_dict(),
     }, model_path)
     print(f"Model saved to {model_path}")
 
 def load_model_from_checkpoint(args, best=False):
-    """从检查点加载模型"""
+    """Load a model checkpoint"""
     model = initialize_model(args)
     
     model_type = 'ft' if args.finetune else 'scr'
@@ -86,14 +86,14 @@ def load_model_from_checkpoint(args, best=False):
     return model
 
 def initialize_optimizer_and_scheduler(args, model, epoch_length):
-    """初始化优化器和学习率调度器"""
+    """Initialize optimizer and learning-rate scheduler"""
     optimizer = initialize_optimizer(args, model)
     scheduler = initialize_scheduler(args, optimizer, epoch_length)
     return optimizer, scheduler
 
 def initialize_optimizer(args, model):
-    """初始化优化器，对不同的参数使用不同的权重衰减"""
-    # 获取需要权重衰减的参数名（排除层归一化和偏置项）
+    """Initialize the optimizer with per-parameter weight decay settings"""
+    # Get parameter names that should receive weight decay (skip layer norm and bias terms)
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     
@@ -124,7 +124,7 @@ def initialize_optimizer(args, model):
     return optimizer
         
 def initialize_scheduler(args, optimizer, epoch_length):
-    """初始化学习率调度器"""
+    """Initialize the learning-rate scheduler"""
     if args.scheduler_type == "none":
         print("No learning rate scheduler used")
         return None
@@ -147,7 +147,7 @@ def initialize_scheduler(args, optimizer, epoch_length):
     return scheduler
 
 def get_parameter_names(model, forbidden_layer_types):
-    """递归获取所有参数名"""
+    """Recursively collect parameter names"""
     result = []
     for name, child in model.named_children():
         result += [
@@ -155,6 +155,6 @@ def get_parameter_names(model, forbidden_layer_types):
             for n in get_parameter_names(child, forbidden_layer_types)
             if not isinstance(child, tuple(forbidden_layer_types))
         ]
-    # 添加模型特定参数
+    # Append model-specific parameters
     result += list(model._parameters.keys())
     return result
